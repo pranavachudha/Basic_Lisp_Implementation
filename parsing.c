@@ -42,7 +42,7 @@ int main(int argc, char** argv) {
 			Number, Operator, Expr, Lisps);
 
 	/* Print the version and the exit instructions */
-	puts("Lisps Version 0.0.0.0.1");
+	puts("Lisps Version 0.0.0.0.2");
 	puts("Press Ctrl+c to Exit\n");
 
 	/* In a never ending loop */
