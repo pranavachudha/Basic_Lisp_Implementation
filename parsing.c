@@ -1,6 +1,9 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <math.h>
 
+#define MIN(a,b) ((a) < (b) ? (a) : (b))
+#define MAX(a,b) ((a) > (b) ? (a) : (b))
 
 /* If we are compiling on windows compile these functions */
 #ifdef _WIN32
@@ -42,12 +45,34 @@ int number_of_nodes(mpc_ast_t* t) {
 	return 0;
 }
 
+/* Counts the number of leaves in the tree */
+int number_leaf_nodes(mpc_ast_t* t) {
+	if (t->children_num == 0) {
+		return 1;
+	}
+
+	if (t->children_num >= 1){
+		int leaf_nodes = 0;
+		for (int i = 0; i < t->children_num; i++)
+			leaf_nodes += number_leaf_nodes(t->children[i]);
+		return leaf_nodes;
+	}
+	
+	return 0;
+}
+
+		
+
 /* Use Operator string to see which operation to perform */
 long eval_op(long x, char* op, long y) {
 	if (strcmp(op, "+") == 0) { return x + y; }
 	if (strcmp(op, "-") == 0) { return x - y; }
 	if (strcmp(op, "*") == 0) { return x * y; }
 	if (strcmp(op, "/") == 0) { return x / y; }
+	if (strcmp(op, "%") == 0) { return x % y; }
+	if (strcmp(op, "^") == 0) { return pow(x, y); } 
+	if (strcmp(op, "min") == 0) { return MIN(x, y); }
+	if (strcmp(op, "max") == 0) { return MAX(x, y); }
 	return 0;
 }
 
@@ -68,6 +93,12 @@ long eval(mpc_ast_t* t) {
 	/* Iterate the remaining children and combining. */
 	int i = 3;
 
+	if ((strcmp(t->children[i]->tag, "regex") == 0 
+			|| strcmp(t->children[i]->contents, ")") == 0) 
+			&& strcmp(op, "-") == 0) {
+		return -x;
+	}
+
 	while(strstr(t->children[i]->tag, "expr")) {
 		x = eval_op(x, op, eval(t->children[i]));
 		i++;
@@ -87,8 +118,8 @@ int main(int argc, char** argv) {
 
 	mpca_lang(MPCA_LANG_DEFAULT,
 			" 					     \
-			number : /-?[0-9]+/; 			     \
-			operator: '+' | '-' | '*' | '/'; 	     \
+			number: /-?[0-9]+/; 			     \
+			operator: '+' | '-' | '*' | '/' | '%' | '^' | \"min\" | \"max\"; 	     \
 			expr: <number> | '(' <operator> <expr>+ ')'; \
 			lisps: /^/ <operator> <expr>+ /$/; 	     \
 			",
@@ -118,6 +149,10 @@ int main(int argc, char** argv) {
 			long result = eval(r.output);
 			printf("%li\n", result);
 			printf("Total Number of nodes: %d\n", number_of_nodes(r.output));
+			printf("Number of leaf nodes: %d\n", number_leaf_nodes(r.output));
+			printf("Number of branches: %d\n", number_of_nodes(r.output) - 1);
+	
+
 			mpc_ast_delete(r.output);
 		} else {
 			mpc_err_print(r.error);
