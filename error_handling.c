@@ -7,10 +7,10 @@
 #define MAX(a,b) ((a) > (b) ? (a) : (b))
 
 /* Create Enumberation of Possible lval Types */
-enum { LVAL_NUM, LVAL_ERR};
+enum { LVAL_NUM, LVAL_ERR };
 
 /* Create Enumeration of Possible Error Types for the err field in lval struct */
-enum { LERR_DIV_ZERO, LERR_BAD_OP, LERR_BAD_NUM };
+enum { LERR_DIV_ZERO, LERR_BAD_OP, LERR_BAD_NUM, LERR_REM_DOUBLE };
 
 /* If we are compiling on windows compile these functions */
 #ifdef _WIN32
@@ -36,14 +36,17 @@ void add_history(char* unused){}
 #endif
 
 /* Declare New lval(lisp value) struct */
-typedef struct {
+typedef union {
 	int type;
-	long num;
-	int err;
+	union {
+		double num;
+		int err;
+	};
 }lval;
 
+
 /* Create a new number type lval */
-lval lval_num(long x) {
+lval lval_num(double x) {
 	lval v;
 	v.type = LVAL_NUM;
 	v.num = x;
@@ -62,7 +65,7 @@ lval lval_err(int x) {
 void lval_print(lval v) {
 	switch(v.type) {
 		/* if the v.type value is a number print it and break out */
-		case LVAL_NUM: printf("%li", v.num); break;
+		case LVAL_NUM: printf("%lf", v.num); break;
 
 		/* if the v.type value is an error print the appropriate error */	
 		case LVAL_ERR:
@@ -77,7 +80,10 @@ void lval_print(lval v) {
 			       if(v.err == LERR_BAD_NUM) {
 				       printf("Error: Invalid Number!");
 			       }
-			       
+
+			       if(v.err == LERR_REM_DOUBLE) {
+				       printf("Error: Invalid Operands for Remainder Operator");
+			       }
 			       break;
 	}
 }
@@ -130,7 +136,6 @@ lval eval_op(lval x, char* op, lval y) {
 	if (strcmp(op, "+") == 0) { return lval_num(x.num + y.num); }
 	if (strcmp(op, "-") == 0) { return lval_num(x.num - y.num); }
 	if (strcmp(op, "*") == 0) { return lval_num(x.num * y.num); }
-	if (strcmp(op, "%") == 0) { return lval_num(x.num % y.num); }
 	if (strcmp(op, "^") == 0) { return lval_num(pow(x.num, y.num)); } 
 	if (strcmp(op, "min") == 0) { return lval_num(MIN(x.num, y.num)); }
 	if (strcmp(op, "max") == 0) { return lval_num(MAX(x.num, y.num)); }
@@ -142,11 +147,22 @@ lval eval_op(lval x, char* op, lval y) {
 			? lval_err(LERR_DIV_ZERO)
 			: lval_num(x.num / y.num); 
 	}
-	if (strcmp(op, "%") == 0) {
 
-	       	return y.num == 0
-			? lval_err(LERR_DIV_ZERO)
-			: lval_num(x.num % y.num); 
+	else if (strcmp(op, "%") == 0) {
+
+	       	if (y.num == 0){
+			return lval_err(LERR_DIV_ZERO);
+		}
+
+		if ((((int) x.num - x.num) == 0)
+				&& (((int) y.num - y.num) == 0)) {
+		      return lval_num((int) x.num % (int) y.num);
+		}
+		
+		else {
+			return lval_err(LERR_REM_DOUBLE);
+		}
+				
 	}
 
 	return lval_err(LERR_BAD_OP);
@@ -158,7 +174,7 @@ lval eval(mpc_ast_t* t) {
 	if (strstr(t->tag, "number")) {
 		/* Check if there is some error in conversion */
 		errno = 0;
-		long x = strtol(t->contents, NULL, 10);
+		double x = strtod(t->contents, NULL);
 		return errno != ERANGE ? lval_num(x) : lval_err(LERR_BAD_NUM);
 	}
 
@@ -195,8 +211,8 @@ int main(int argc, char** argv) {
 
 	mpca_lang(MPCA_LANG_DEFAULT,
 			" 					     \
-			number: /-?[0-9]+/; 			     \
-			operator: '+' | '-' | '*' | '/' | '%' | '^' | \"min\" | \"max\"; 	     \
+			number: /-?[0-9]+(\\.[0-9]+)?/; 			     \
+			operator: '+' | '-' | '*' | '/' | '%' | '^' | \"min\" | \"max\";\
 			expr: <number> | '(' <operator> <expr>+ ')'; \
 			lisps: /^/ <operator> <expr>+ /$/; 	     \
 			",
