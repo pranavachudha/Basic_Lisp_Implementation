@@ -60,7 +60,8 @@ lval* lval_num(double x) {
 lval* lval_err(char* x) {
 	lval* v = malloc(sizeof(lval));
 	v->type = LVAL_ERR;
-	v->err = x;
+	v->err = malloc(strlen(x) + 1);
+	strcpy(v->err, x);
 	return v;
 }
 
@@ -84,7 +85,7 @@ lval* lval_sexpr(void) {
 
 lval* lval_read_num(mpc_ast_t* t) {
 	errno = 0;
-	long x = strtod(t->contents, NULL);
+	double x = strtod(t->contents, NULL);
 	return errno != ERANGE ?
 		lval_num(x): lval_err("Invalid Number");
 }
@@ -210,80 +211,133 @@ int number_leaf_nodes(mpc_ast_t* t) {
 
 		
 
-/* Use Operator string to see which operation to perform */
-// lval eval_op(lval x, char* op, lval y) {
-//
-// 	/* If either value is an error return it */
-// 	if (x.type == LVAL_ERR) { return x; }
-// 	if (y.type == LVAL_ERR) { return y; }
-//
-// 	if (strcmp(op, "+") == 0) { return lval_num(x.num + y.num); }
-// 	if (strcmp(op, "-") == 0) { return lval_num(x.num - y.num); }
-// 	if (strcmp(op, "*") == 0) { return lval_num(x.num * y.num); }
-// 	if (strcmp(op, "^") == 0) { return lval_num(pow(x.num, y.num)); } 
-// 	if (strcmp(op, "min") == 0) { return lval_num(MIN(x.num, y.num)); }
-// 	if (strcmp(op, "max") == 0) { return lval_num(MAX(x.num, y.num)); }
-//
-// 	/* Division and Remainder operator are prone to Division by zero error */
-// 	if (strcmp(op, "/") == 0) {
-//
-// 	       	return y.num == 0
-// 			? lval_err(LERR_DIV_ZERO)
-// 			: lval_num(x.num / y.num); 
-// 	}
-//
-// 	else if (strcmp(op, "%") == 0) {
-//
-// 	       	if (y.num == 0){
-// 			return lval_err(LERR_DIV_ZERO);
-// 		}
-//
-// 		if ((((int) x.num - x.num) == 0)
-// 				&& (((int) y.num - y.num) == 0)) {
-// 		      return lval_num((int) x.num % (int) y.num);
-// 		}
-//
-// 		else {
-// 			return lval_err(LERR_REM_DOUBLE);
-// 		}
-//
-// 	}
-//
-// 	return lval_err(LERR_BAD_OP);
-// }
+lval* lval_eval(lval* v);
+lval* lval_take(lval* v, int i);
+lval* lval_pop(lval* v, int i);
+lval* builtin_op(lval* a, char* op);
+
+lval* lval_eval_sexpr(lval* v){
+	/* Evaluate Children */
+	for (int i = 0; i < v->count; i++){
+		v->cell[i] = lval_eval(v->cell[i]);
+	}
+
+	/* Error Checking */
+	for (int i = 0; i < v->count; i++) {
+		if(v->cell[i]->type == LVAL_ERR) { return lval_take(v, i); }
+	}
+
+	/* Empty Expression */
+	if (v->count == 0) { return v; }
+
+	/* Single Expression */
+	if (v->count == 1) { return lval_take(v, 0); }
+
+	/* Ensure First Element is Symbol */
+	lval* f = lval_pop(v, 0);
+	if (f->type != LVAL_SYM) {
+		lval_del(f); lval_del(v);
+		return lval_err("S-expression Does not start with Symbol!");
+	}
+
+	/* Call builtin with operator */
+	lval* result = builtin_op(v, f->sym);
+	lval_del(f);
+	return result;
+}
+
+lval* lval_eval(lval* v) {
+	/* Evaluate S-expressions */
+	if (v->type == LVAL_SEXPR) { return lval_eval_sexpr(v); }
+	/* All other lval types remain the same */
+	return v;
+}
+
+lval* lval_pop(lval* v, int i) {
+	/* Find the item at "i" */
+	lval* x = v->cell[i];
+
+	/* Shift memory after the item at "i" over the top */
+	memmove(&v->cell[i], &v->cell[i+1],
+	 sizeof(lval*) * (v->count-i-1));
+
+	/* Decresae the count of items in the list */
+	v->count--;
+
+	/* Reallocate the memory used */
+	v->cell = realloc(v->cell, sizeof(lval*) * v->count);
+	return x;
+
+}
+
+lval* lval_take(lval* v, int i) {
+	lval* x = lval_pop(v, i);
+	lval_del(v);
+	return x;
+}
+
+lval* builtin_op(lval* a, char* op) {
+
+	/* Ensure all arguments are numbers */
+	for (int i = 0; i < a->count; i++) {
+		if (a->cell[i]->type != LVAL_NUM) {
+			lval_del(a);
+			return lval_err("Cannot operate on non-number!");
+		}
+	}
+
+	/* Pop the first element */
+	lval* x = lval_pop(a, 0);
+
+	/* If no arguments and sub then perform unary negation */
+	if ((strcmp(op, "-") == 0) && a->count == 0) {
+		x->num = -x->num;
+	}
+
+	/*While there are still elements remaining */
+	while(a->count > 0) {
+		/* Pop the next element */
+		lval* y = lval_pop(a, 0);
+
+		if(strcmp(op, "+") == 0) { x->num += y->num; }
+		if(strcmp(op, "-") == 0) { x->num -= y->num; }
+		if(strcmp(op, "*") == 0) { x->num *= y->num; }
+		if(strcmp(op, "/") == 0) {
+			if(y->num == 0) {
+			lval_del(x); lval_del(y);
+			x = lval_err("Division By Zero!"); break;
+			}
+			x->num /= y->num;
+		}
+		if(strcmp(op, "%") == 0) {
+			if(y->num == 0) {
+				lval_del(x); lval_del(y);
+				x = lval_err("Division By Zero!"); break;
+			}
+
+			if(y->num == (int) y->num && x->num == (int) x->num){
+				int temp_x = (int) x->num;
+				int temp_y = (int) y->num;
+				temp_x %= temp_y;
+				x->num = temp_x;
+			}
+
+			else{
+				lval_del(x); lval_del(y);
+				x = lval_err("Cannot use remainder operator with decimal numbers"); break;
+			}
+		}
+		
+		lval_del(y);
+	}
+
+	lval_del(a); return x;
+	
+}
 
 
 
-// lval eval(mpc_ast_t* t) {
-// 	if (strstr(t->tag, "number")) {
-// 		/* Check if there is some error in conversion */
-// 		errno = 0;
-// 		double x = strtod(t->contents, NULL);
-// 		return errno != ERANGE ? lval_num(x) : lval_err(LERR_BAD_NUM);
-// 	}
-//
-//        	/* The operator is always second child. */
-//        	char * op = t->children[1]->contents;
-// 	/* We store the third child in 'x' */
-// 	lval x = eval(t->children[2]);
-//
-// 	/* Iterate the remaining children and combining. */
-// 	int i = 3;
-//
-// 	if ((strcmp(t->children[i]->tag, "regex") == 0 
-// 			|| strcmp(t->children[i]->contents, ")") == 0) 
-// 			&& strcmp(op, "-") == 0) {
-// 		return lval_num(-(x.num));
-// 	}
-//
-// 	while(strstr(t->children[i]->tag, "expr")) {
-// 		x = eval_op(x, op, eval(t->children[i]));
-// 		i++;
-// 	}
-//
-// 	return x;
-// }
-//
+
 
 
 
@@ -305,7 +359,7 @@ int main(int argc, char** argv) {
 			Number, Symbol, Sexpr, Expr, Lisps);
 
 	/* Print the version and the exit instructions */
-	puts("Lisps Version 0.0.0.0.4");
+	puts("Lisps Version 0.0.0.0.5");
 	puts("Press Ctrl+c to Exit\n");
 
 	
@@ -326,12 +380,12 @@ int main(int argc, char** argv) {
 		mpc_result_t r;
 
 		if (mpc_parse("<stdin>", input, Lisps, &r)) {
-			lval* result = lval_read(r.output);
+			lval* result = lval_eval(lval_read(r.output));
 			lval_println(result);
 			lval_del(result);
 			printf("Total Number of nodes: %d\n", number_of_nodes(r.output));
 			printf("Number of leaf nodes: %d\n", number_leaf_nodes(r.output));
-			printf("Number of branches: %d\n", number_of_nodes(r.output) - 1);
+			printf("Number of branches: %d\n\n", number_of_nodes(r.output) - 1);
 			mpc_ast_delete(r.output);
 		}
 
