@@ -1,6 +1,5 @@
 #include <stdio.h>
 #include <stdlib.h>
-#include <math.h>
 #include "mpc.h"
 
 #define MIN(a,b) ((a) < (b) ? (a) : (b))
@@ -9,8 +8,6 @@
 /* Create Enumberation of Possible lval Types */
 enum { LVAL_NUM, LVAL_ERR, LVAL_SYM, LVAL_SEXPR };
 
-/* Create Enumeration of Possible Error Types for the err field in lval struct */
-enum { LERR_DIV_ZERO, LERR_BAD_OP, LERR_BAD_NUM, LERR_REM_DOUBLE };
 
 /* If we are compiling on windows compile these functions */
 #ifdef _WIN32
@@ -164,7 +161,7 @@ void lval_expr_print(lval* v, char open, char close) {
 void lval_print(lval* v) {
 	switch(v->type) {
 		/* if the v.type value is a number print it and break out */
-		case LVAL_NUM: printf("%lf", v->num); break;
+		case LVAL_NUM: printf("%.6g", v->num); break;
 		case LVAL_ERR: printf("Error: %s", v->err); break;
 		case LVAL_SYM: printf("%s", v->sym); break;
 		case LVAL_SEXPR: lval_expr_print(v, '(', ')'); break;
@@ -298,7 +295,8 @@ lval* builtin_op(lval* a, char* op) {
 	while(a->count > 0) {
 		/* Pop the next element */
 		lval* y = lval_pop(a, 0);
-
+		if(strcmp(op, "min") == 0) { x->num = MIN(x->num, y->num); }
+		if(strcmp(op, "max") == 0) { x->num = MAX(x->num, y->num); }
 		if(strcmp(op, "+") == 0) { x->num += y->num; }
 		if(strcmp(op, "-") == 0) { x->num -= y->num; }
 		if(strcmp(op, "*") == 0) { x->num *= y->num; }
@@ -334,12 +332,6 @@ lval* builtin_op(lval* a, char* op) {
 	lval_del(a); return x;
 	
 }
-
-
-
-
-
-
 
 int main(int argc, char** argv) {
 	mpc_parser_t* Number = mpc_new("number");
