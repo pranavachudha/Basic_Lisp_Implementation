@@ -6,6 +6,10 @@
 #define MAX(a,b) ((a) > (b) ? (a) : (b))
 #define LASSERT(args, cond, err) \
 	if (!(cond)) { lval_del(args); return lval_err(err); }
+#define LASSERT_NOA(args, err) \
+	if (!(args->count == 1)) { lval_del(args); return lval_err(err); }
+#define LASSERT_ELIST(args, err) \
+	if ((args->cell[0]->count == 0)) { lval_del(args); return lval_err(err); }
 
 /* Create Enumberation of Possible lval Types */
 enum { LVAL_NUM, LVAL_ERR, LVAL_SYM, LVAL_SEXPR, LVAL_QEXPR };
@@ -259,6 +263,7 @@ lval* lval_eval_sexpr(lval* v){
 	return result;
 }
 
+
 lval* lval_eval(lval* v) {
 	/* Evaluate S-expressions */
 	if (v->type == LVAL_SEXPR) { return lval_eval_sexpr(v); }
@@ -353,14 +358,12 @@ lval* builtin_op(lval* a, char* op) {
 
 lval* builtin_head(lval* a) {
 	/* Check Error Conditions */
-	LASSERT(a, a->count == 1,
-	 "Function 'head' passed too many arguments!")
+	LASSERT_NOA(a, "Function 'head' passed too many arguments!");
 
 	LASSERT(a, a->cell[0]->type == LVAL_QEXPR,
 	 "Function 'head' passed incorrect type!");
 
-	LASSERT(a, a->cell[0]->count != 0,
-	 "Function 'head' passed {}!");
+	LASSERT_ELIST(a, "Function 'head' passed {}!");
 
 	lval* v = lval_take(a, 0);
 
@@ -371,14 +374,12 @@ lval* builtin_head(lval* a) {
 
 lval* builtin_tail(lval* a) {
 	/* Check Error Conditions */
-	LASSERT(a, a->count == 1,
-	 "Function 'tail' passed too many arguments!")
+	LASSERT_NOA(a, "Function 'tail' passed too many arguments!")
 
 	LASSERT(a, a->cell[0]->type == LVAL_QEXPR,
 	 "Function 'tail' passed incorrect type!");
 
-	LASSERT(a, a->cell[0]->count != 0,
-	 "Function 'tail' passed {}!");
+	LASSERT_ELIST(a, "Function 'tail' passed {}!");
 
 	lval* v = lval_take(a, 0);
 
@@ -431,12 +432,70 @@ lval* builtin_join(lval* a) {
 	return x;
 }
 
+/* Takes a Value and a Q-Expression and appends it to the front */
+lval* builtin_cons(lval* a) {
+	LASSERT(a, a->count == 2,
+	 "Function 'cons' passed with less or more arguments.");
+
+	LASSERT(a, a->cell[0]->type == LVAL_NUM && a->cell[1]->type == LVAL_QEXPR,
+	 "Function 'cons' passed with an Invalid argument.");
+	
+
+
+	
+	lval* value = lval_pop(a, 0);
+	int content = value->num;
+
+	lval* value_qex = lval_qexpr();
+	lval_add(value_qex, lval_num(content));
+	lval_join(value_qex,lval_pop(a, 0));
+	lval_del(value);
+	lval_del(a);
+	
+	return value_qex;
+}
+
+lval* builtin_len(lval* a) {
+	LASSERT(a, a->count == 1,
+	 "Function 'len' passed with less or more arguments.");
+
+	LASSERT(a, a->cell[0]->type == LVAL_QEXPR,
+	 "Function 'len' passed with an Invalid argument.");
+	
+	lval* length = lval_num(a->cell[0]->count);	
+
+	lval_del(a);
+	return length;
+}
+	 
+
+lval* builtin_init(lval* a) {
+	LASSERT(a, a->count == 1,
+	 "Function 'init' passed too many arguments.");
+
+	LASSERT(a, a->cell[0]->type == LVAL_QEXPR,
+	 "Function 'init' passed with an Invalid argument.");
+	
+	lval* result = lval_qexpr();
+	lval_pop(a->cell[0], a->cell[0]->count - 1);
+	
+	while (a->cell[0]->count > 0){
+		lval_add(result, lval_pop(a->cell[0], 0));
+	}
+
+	lval_del(a);
+	return result;
+}
+
 lval* builtin(lval* a, char* func) {
 	if (strcmp("list", func) == 0) { return builtin_list(a); }
 	if (strcmp("head", func) == 0) { return builtin_head(a); }
 	if (strcmp("tail", func) == 0) { return builtin_tail(a); }
 	if (strcmp("join", func) == 0) { return builtin_join(a); }
 	if (strcmp("eval", func) == 0) { return builtin_eval(a); }
+	if (strcmp("cons", func) == 0) { return builtin_cons(a); }
+	if (strcmp("len", func) == 0) { return builtin_len(a); }
+	if (strcmp("init", func) == 0) { return builtin_init(a); }
 	if (strstr("+-/%*minmax", func)) { return builtin_op(a, func); }
 	lval_del(a);
 	return lval_err("Unknown Function!");
@@ -455,10 +514,10 @@ int main(int argc, char** argv) {
 			number: /-?[0-9]+(\\.[0-9]+)?/; 		     \
 			symbol: '+' | '-' | '*' | '/' | '%' | '^' 	     \
 	   		| \"min\" | \"max\" | \"list\" | \"head\" | \"tail\" \
-			| \"join\" | \"eval\";				     \
+			| \"join\" | \"eval\" | \"cons\" | \"len\" | \"init\" ;	     \
 			sexpr: '(' <expr>* ')' ;			     \
 			qexpr: '{' <expr>* '}' ;			     \
-			expr: <number> | <symbol> | <sexpr> | <qexpr> ; 		     \
+			expr: <number> | <symbol> | <sexpr> | <qexpr> ;      \
 			lisps: /^/ <expr>* /$/; 	     		     \
 			",
 			Number, Symbol, Sexpr, Qexpr, Expr, Lisps);
