@@ -11,8 +11,14 @@
 #define LASSERT_ELIST(args, err) \
 	if ((args->cell[0]->count == 0)) { lval_del(args); return lval_err(err); }
 
+/* Forward Declarations */
+struct lval;
+struct lenv;
+typedef struct lval lval;
+typedef struct lenv lenv;
+
 /* Create Enumberation of Possible lval Types */
-enum { LVAL_NUM, LVAL_ERR, LVAL_SYM, LVAL_SEXPR, LVAL_QEXPR };
+enum { LVAL_NUM, LVAL_ERR, LVAL_SYM, LVAL_FUN, LVAL_SEXPR, LVAL_QEXPR };
 
 
 /* If we are compiling on windows compile these functions */
@@ -38,18 +44,88 @@ void add_history(char* unused){}
 #include <editline/readline.h>
 #endif
 
+typedef lval*(*lbuiltin)(lenv*, lval*);
+
 /* Declare New lval(lisp value) struct */
-typedef struct lval{
+struct lval{
 	int type;
 	double num;
 	/*Error and symbol types have some string data */
 	char* err;
 	char* sym;
+	lbuiltin fun;
 	/* Count and Pointer to a list of "lval*" */
 	int count;
-	struct lval** cell;
-}lval;
+	lval** cell;
+};
 
+struct lenv {
+	int count;
+	char** syms;
+	lval** vals;
+};
+
+lenv* lenv_new(void) {
+	lenv* e = malloc(sizeof(lenv));
+	e->count = 0;
+	e->syms = NULL;
+	e->vals = NULL;
+	return e;
+}
+
+/* Forward Declaration */
+void lval_del(lval* a);
+lval* lval_copy(lval* a);
+lval* lval_err(char* x);
+
+void lenv_del(lenv* e) {
+	for (int i = 0; i < e->count; i++) {
+		free(e->syms[i]);
+		lval_del(e->vals[i]);
+	}
+	free(e->syms);
+	free(e->vals);
+	free(e);
+}
+
+lval* lenv_get(lenv* e, lval* k) {
+	/* Iterate over all items in environment */
+	for (int i = 0; i < e->count; i++) {
+		/* Check if the Stored string matches the symbol string */
+		/* If it does, return a copy of the value */
+		if (strcmp(e->syms[i], k->sym) == 0) {
+			return lval_copy(e->vals[i]);
+		}
+	}
+
+	return lval_err("unbound symbol!");
+}
+
+void lenv_put(lenv* e, lval* k, lval* v) {
+	
+	/* Iterate over all the items in environment */
+	/* This is to see if variable already exists */
+	for (int i = 0; i < e->count; i++) {
+
+		/* If variable is found delete item at that position */
+		/* And replace with variable supplied by user */
+		if (strcmp(e->syms[i], k->sym) == 0) {
+			lval_del(e->vals[i]);
+			e->vals[i] = lval_copy(v);
+			return;
+		}
+	}
+
+	/* If no existing entry found allocate space for new entry */
+	e->count++;
+	e->vals = realloc(e->vals, sizeof(lval*) * e->count);
+	e->syms = realloc(e->syms, sizeof(char*) * e->count);
+
+	/* Copy contents of lval and symbol string into new location */
+	e->vals[e->count-1] = lval_copy(v);
+	e->syms[e->count-1] = malloc(strlen(k->sym) + 1);
+	strcpy(e->syms[e->count-1], k->sym);
+}
 
 /* Construct a pointer to a new Number lval */
 lval* lval_num(double x) {
@@ -74,6 +150,14 @@ lval* lval_sym(char* s) {
 	v->type = LVAL_SYM;
 	v->sym = malloc(strlen(s) + 1);
 	strcpy(v->sym, s);
+	return v;
+}
+
+/* Construct a pointer to a new Function lval */
+lval* lval_fun(lbuiltin func) {
+	lval* v = malloc(sizeof(lval));
+	v->type = LVAL_FUN;
+	v->fun = func;
 	return v;
 }
 
@@ -135,6 +219,38 @@ lval* lval_read(mpc_ast_t* t) {
 	return x;
 }
 
+lval* lval_copy(lval* v) {
+	lval* x = malloc(sizeof(lval));
+	x->type = v->type;
+
+	switch (v->type) {
+		/* Copy Functions and Numbers Directly */
+		case LVAL_FUN: x->fun = v->fun; break;
+		case LVAL_NUM: x->num = v->num; break;
+
+		/* Copy Strings using malloc and strcpy */
+		case LVAL_ERR:
+			x->err = malloc(strlen(v->err) + 1);
+			strcpy(x->err, v->err); break;
+
+		case LVAL_SYM:
+			x->sym = malloc(strlen(v->sym) + 1);
+			strcpy(x->sym, v->sym); break;
+
+		/*Copy Lists by copying each sub-expression */
+		case LVAL_SEXPR:
+		case LVAL_QEXPR:
+			x->count = v->count;
+			x->cell = malloc(sizeof(lval*) * x->count);
+			for (int i = 0; i < x->count; i++) {
+				x->cell[i] = lval_copy(v->cell[i]);
+			}
+		break;
+	}
+
+	return x;
+}
+
 
 void lval_del(lval* v) {
 	switch (v->type) {
@@ -144,7 +260,7 @@ void lval_del(lval* v) {
 		/* For Err or Sym free the string data */
 		case LVAL_ERR: free(v->err); break;
 		case LVAL_SYM: free(v->sym); break;
-
+		case LVAL_FUN: break;
 		/* If Qexpr or Sexpr then delete all elements inside */
 		case LVAL_QEXPR:
 		case LVAL_SEXPR:
@@ -182,6 +298,7 @@ void lval_print(lval* v) {
 		case LVAL_NUM: printf("%.6g", v->num); break;
 		case LVAL_ERR: printf("Error: %s", v->err); break;
 		case LVAL_SYM: printf("%s", v->sym); break;
+		case LVAL_FUN: printf("<function>"); break;
 		case LVAL_SEXPR: lval_expr_print(v, '(', ')'); break;
 		case LVAL_QEXPR: lval_expr_print(v, '{', '}'); break;
 	}
@@ -512,9 +629,7 @@ int main(int argc, char** argv) {
 	mpca_lang(MPCA_LANG_DEFAULT,
 			" 					     	     \
 			number: /-?[0-9]+(\\.[0-9]+)?/; 		     \
-			symbol: '+' | '-' | '*' | '/' | '%' | '^' 	     \
-	   		| \"min\" | \"max\" | \"list\" | \"head\" | \"tail\" \
-			| \"join\" | \"eval\" | \"cons\" | \"len\" | \"init\" ;	     \
+			symbol: /[a-zA-Z0-9_+\\-*\\/\\\\=<>!&]+/;	     \
 			sexpr: '(' <expr>* ')' ;			     \
 			qexpr: '{' <expr>* '}' ;			     \
 			expr: <number> | <symbol> | <sexpr> | <qexpr> ;      \
