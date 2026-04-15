@@ -344,16 +344,16 @@ int number_leaf_nodes(mpc_ast_t* t) {
 
 		
 
-lval* lval_eval(lval* v);
+lval* lval_eval(lenv* e, lval* v);
 lval* lval_take(lval* v, int i);
 lval* lval_pop(lval* v, int i);
-lval* builtin_op(lval* a, char* op);
+lval* builtin_op(lenv* e, lval* a, char* op);
 lval* builtin(lval* a, char* func);
 
-lval* lval_eval_sexpr(lval* v){
+lval* lval_eval_sexpr(lenv* e, lval* v){
 	/* Evaluate Children */
 	for (int i = 0; i < v->count; i++){
-		v->cell[i] = lval_eval(v->cell[i]);
+		v->cell[i] = lval_eval(e, v->cell[i]);
 	}
 
 	/* Error Checking */
@@ -369,21 +369,26 @@ lval* lval_eval_sexpr(lval* v){
 
 	/* Ensure First Element is Symbol */
 	lval* f = lval_pop(v, 0);
-	if (f->type != LVAL_SYM) {
+	if (f->type != LVAL_FUN) {
 		lval_del(f); lval_del(v);
-		return lval_err("S-expression Does not start with Symbol!");
+		return lval_err("First element is not a function");
 	}
 
 	/* Call builtin with operator */
-	lval* result = builtin(v, f->sym);
+	lval* result = f->fun(e, v);
 	lval_del(f);
 	return result;
 }
 
 
-lval* lval_eval(lval* v) {
+lval* lval_eval(lenv* e, lval* v) {
+	if (v->type == LVAL_SYM) {
+		lval* x = lenv_get(e, v);
+		lval_del(v);
+		return x;
+	}
 	/* Evaluate S-expressions */
-	if (v->type == LVAL_SEXPR) { return lval_eval_sexpr(v); }
+	if (v->type == LVAL_SEXPR) { return lval_eval_sexpr(e, v); }
 	if (v->type == LVAL_QEXPR) { return v; }
 	/* All other lval types remain the same */
 	return v;
@@ -412,7 +417,7 @@ lval* lval_take(lval* v, int i) {
 	return x;
 }
 
-lval* builtin_op(lval* a, char* op) {
+lval* builtin_op(lenv* e, lval* a, char* op) {
 
 	/* Ensure all arguments are numbers */
 	for (int i = 0; i < a->count; i++) {
@@ -473,7 +478,36 @@ lval* builtin_op(lval* a, char* op) {
 	
 }
 
-lval* builtin_head(lval* a) {
+lval* builtin_add(lenv* e, lval* a) {
+	return builtin_op(e, a, "+");
+}
+
+lval* builtin_sub(lenv* e, lval* a) {
+	return builtin_op(e, a, "-");
+}
+
+lval* builtin_mul(lenv* e, lval* a) {
+	return builtin_op(e, a, "*");
+}
+
+lval* builtin_div(lenv* e, lval* a) {
+	return builtin_op(e, a, "/");
+}
+
+lval* builtin_rem(lenv* e, lval* a) {
+	return builtin_op(e, a, "%");
+}
+
+lval* builtin_min(lenv* e, lval* a) {
+	return builtin_op(e, a, "min");
+}
+
+lval* builtin_max(lenv* e, lval* a) {
+	return builtin_op(e, a, "max");
+}
+
+
+lval* builtin_head(lenv* e, lval* a) {
 	/* Check Error Conditions */
 	LASSERT_NOA(a, "Function 'head' passed too many arguments!");
 
@@ -489,7 +523,7 @@ lval* builtin_head(lval* a) {
 	return v;
 }
 
-lval* builtin_tail(lval* a) {
+lval* builtin_tail(lenv* e, lval* a) {
 	/* Check Error Conditions */
 	LASSERT_NOA(a, "Function 'tail' passed too many arguments!")
 
@@ -504,12 +538,12 @@ lval* builtin_tail(lval* a) {
 	return v;
 }
 
-lval* builtin_list(lval* a) {
+lval* builtin_list(lenv* e, lval* a) {
 	a->type = LVAL_QEXPR;
 	return a;
 }
 
-lval* builtin_eval(lval* a) {
+lval* builtin_eval(lenv* e, lval* a) {
 	LASSERT(a, a->count == 1,
 	 "Function 'eval' passed too many arguments!");
 
@@ -518,7 +552,7 @@ lval* builtin_eval(lval* a) {
 
 	lval* x = lval_take(a, 0);
 	x->type = LVAL_SEXPR;
-	return lval_eval(x);
+	return lval_eval(e, x);
 }
 
 lval* lval_join(lval* x, lval* y) {
@@ -533,7 +567,7 @@ lval* lval_join(lval* x, lval* y) {
 	return x;
 }
 
-lval* builtin_join(lval* a) {
+lval* builtin_join(lenv* e, lval* a) {
 	for (int i = 0; i < a->count; i++) {
 		LASSERT(a, a->cell[i]->type == LVAL_QEXPR,
       "Function 'join' passed incorrect type.");
@@ -550,7 +584,7 @@ lval* builtin_join(lval* a) {
 }
 
 /* Takes a Value and a Q-Expression and appends it to the front */
-lval* builtin_cons(lval* a) {
+lval* builtin_cons(lenv* e, lval* a) {
 	LASSERT(a, a->count == 2,
 	 "Function 'cons' passed with less or more arguments.");
 
@@ -572,7 +606,7 @@ lval* builtin_cons(lval* a) {
 	return value_qex;
 }
 
-lval* builtin_len(lval* a) {
+lval* builtin_len(lenv* e, lval* a) {
 	LASSERT(a, a->count == 1,
 	 "Function 'len' passed with less or more arguments.");
 
@@ -586,7 +620,7 @@ lval* builtin_len(lval* a) {
 }
 	 
 
-lval* builtin_init(lval* a) {
+lval* builtin_init(lenv* e, lval* a) {
 	LASSERT(a, a->count == 1,
 	 "Function 'init' passed too many arguments.");
 
@@ -604,18 +638,47 @@ lval* builtin_init(lval* a) {
 	return result;
 }
 
-lval* builtin(lval* a, char* func) {
-	if (strcmp("list", func) == 0) { return builtin_list(a); }
-	if (strcmp("head", func) == 0) { return builtin_head(a); }
-	if (strcmp("tail", func) == 0) { return builtin_tail(a); }
-	if (strcmp("join", func) == 0) { return builtin_join(a); }
-	if (strcmp("eval", func) == 0) { return builtin_eval(a); }
-	if (strcmp("cons", func) == 0) { return builtin_cons(a); }
-	if (strcmp("len", func) == 0) { return builtin_len(a); }
-	if (strcmp("init", func) == 0) { return builtin_init(a); }
-	if (strstr("+-/%*minmax", func)) { return builtin_op(a, func); }
-	lval_del(a);
-	return lval_err("Unknown Function!");
+// lval* builtin(lval* a, char* func) {
+// 	if (strcmp("list", func) == 0) { return builtin_list(a); }
+// 	if (strcmp("head", func) == 0) { return builtin_head(a); }
+// 	if (strcmp("tail", func) == 0) { return builtin_tail(a); }
+// 	if (strcmp("join", func) == 0) { return builtin_join(a); }
+// 	if (strcmp("eval", func) == 0) { return builtin_eval(a); }
+// 	if (strcmp("cons", func) == 0) { return builtin_cons(a); }
+// 	if (strcmp("len", func) == 0) { return builtin_len(a); }
+// 	if (strcmp("init", func) == 0) { return builtin_init(a); }
+// 	if (strstr("+-/%*minmax", func)) { return builtin_op(a, func); }
+// 	lval_del(a);
+// 	return lval_err("Unknown Function!");
+// }
+
+void lenv_add_builtin(lenv* e, char* name, lbuiltin func) {
+	lval* k = lval_sym(name);
+	lval* v = lval_fun(func);
+	lenv_put(e, k, v);
+	lval_del(k); lval_del(v);
+}
+
+void lenv_add_builtins(lenv* e) {
+	/* List Functions */
+	lenv_add_builtin(e, "list", builtin_list);
+	lenv_add_builtin(e, "head", builtin_head);
+	lenv_add_builtin(e, "tail", builtin_tail);
+	lenv_add_builtin(e, "eval", builtin_eval);
+	lenv_add_builtin(e, "join", builtin_join);
+	lenv_add_builtin(e, "cons", builtin_cons);
+	lenv_add_builtin(e, "init", builtin_init);
+	lenv_add_builtin(e, "len", builtin_len);
+
+	/* Mathematical Functions */
+	lenv_add_builtin(e, "+", builtin_add);
+	lenv_add_builtin(e, "-", builtin_sub);
+	lenv_add_builtin(e, "*", builtin_mul);
+	lenv_add_builtin(e, "/", builtin_div);
+	lenv_add_builtin(e, "%", builtin_rem);
+	lenv_add_builtin(e, "max", builtin_max);
+	lenv_add_builtin(e, "min", builtin_min);
+	
 }
 
 int main(int argc, char** argv) {
@@ -641,6 +704,8 @@ int main(int argc, char** argv) {
 	puts("Lisps Version 0.0.0.0.6");
 	puts("Press Ctrl+c to Exit\n");
 
+	lenv* e = lenv_new();
+	lenv_add_builtins(e);
 	
 	/* In a never ending loop */
 	while (1) {
@@ -660,7 +725,7 @@ int main(int argc, char** argv) {
 
 		if (mpc_parse("<stdin>", input, Lisps, &r)) {
 			//mpc_ast_print(r.output);
-			lval* result = lval_eval(lval_read(r.output));
+			lval* result = lval_eval(e, lval_read(r.output));
 			lval_println(result);
 			lval_del(result);
 			printf("Total Number of nodes: %d\n", number_of_nodes(r.output));
@@ -678,7 +743,7 @@ int main(int argc, char** argv) {
 		
 		
 	}
-
+	lenv_del(e);
 	mpc_cleanup(6, Number, Symbol, Sexpr, Qexpr, Expr, Lisps);
 	return 0;
 }
