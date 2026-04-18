@@ -4,8 +4,12 @@
 
 #define MIN(a,b) ((a) < (b) ? (a) : (b))
 #define MAX(a,b) ((a) > (b) ? (a) : (b))
-#define LASSERT(args, cond, err) \
-	if (!(cond)) { lval_del(args); return lval_err(err); }
+#define LASSERT(args, cond, fmt, ...) \
+	if (!(cond)) { \
+		lval* err = lval_err(fmt, ##__VA_ARGS__);\
+		lval_del(args); \
+		return err; \
+}
 #define LASSERT_NOA(args, err) \
 	if (!(args->count == 1)) { lval_del(args); return lval_err(err); }
 #define LASSERT_ELIST(args, err) \
@@ -76,7 +80,7 @@ lenv* lenv_new(void) {
 /* Forward Declaration */
 void lval_del(lval* a);
 lval* lval_copy(lval* a);
-lval* lval_err(char* x);
+lval* lval_err(char* fmt, ...);
 
 void lenv_del(lenv* e) {
 	for (int i = 0; i < e->count; i++) {
@@ -98,7 +102,7 @@ lval* lenv_get(lenv* e, lval* k) {
 		}
 	}
 
-	return lval_err("unbound symbol!");
+	return lval_err("Unbound Symbol '%s'", k->sym);
 }
 
 void lenv_put(lenv* e, lval* k, lval* v) {
@@ -136,11 +140,27 @@ lval* lval_num(double x) {
 }
 
 /* Construct a pointer to a new Error lval */
-lval* lval_err(char* x) {
+lval* lval_err(char* fmt, ...) {
 	lval* v = malloc(sizeof(lval));
 	v->type = LVAL_ERR;
-	v->err = malloc(strlen(x) + 1);
-	strcpy(v->err, x);
+	
+
+	/*Create a va list and initialize it */
+	va_list va;
+	va_start(va, fmt);
+
+	/* Allocate 512 bytes of space */
+	v->err = malloc(512);
+
+	/* printf the error string with a maximum of 511 characters */
+	vsnprintf(v->err, 511, fmt, va);
+
+	/* Reallocate to number of bytes actually used*/
+	v->err = realloc(v->err, strlen(v->err) + 1);
+
+	/* Cleanup our va list */
+	va_end(va);	
+
 	return v;
 }
 
@@ -506,13 +526,29 @@ lval* builtin_max(lenv* e, lval* a) {
 	return builtin_op(e, a, "max");
 }
 
-
+char* ltype_name(int t) {
+	switch(t) {
+		case LVAL_FUN: return "Function";
+		case LVAL_NUM: return "Number";
+		case LVAL_ERR: return "Error";
+		case LVAL_SYM: return "Symbol";
+		case LVAL_SEXPR: return "S-Expression";
+		case LVAL_QEXPR: return "Q-Expression";
+		default: return "Unknown";
+	}
+}
 lval* builtin_head(lenv* e, lval* a) {
 	/* Check Error Conditions */
-	LASSERT_NOA(a, "Function 'head' passed too many arguments!");
+	LASSERT(a, a->count == 1, 
+	"Function 'head' passed too many arguments!"
+	"Got %i, Expected %i.",	
+	a->count, 1);
 
 	LASSERT(a, a->cell[0]->type == LVAL_QEXPR,
-	 "Function 'head' passed incorrect type!");
+	 "Function 'head' passed incorrect type for argument 1."
+	"Got %s, Expected %s.", 
+	ltype_name(a->cell[0]->type), ltype_name(LVAL_QEXPR));
+	
 
 	LASSERT_ELIST(a, "Function 'head' passed {}!");
 
@@ -525,10 +561,15 @@ lval* builtin_head(lenv* e, lval* a) {
 
 lval* builtin_tail(lenv* e, lval* a) {
 	/* Check Error Conditions */
-	LASSERT_NOA(a, "Function 'tail' passed too many arguments!")
+	LASSERT(a, a->count == 1, 
+	"Function 'tail' passed too many arguments. "
+	"Got %i, Expected %i.",	
+	a->count, 1);
 
 	LASSERT(a, a->cell[0]->type == LVAL_QEXPR,
-	 "Function 'tail' passed incorrect type!");
+	 "Function 'tail' passed incorrect type for argument 1. "
+	"Got %s, Expected %s.", 
+	ltype_name(a->cell[0]->type), ltype_name(LVAL_QEXPR));
 
 	LASSERT_ELIST(a, "Function 'tail' passed {}!");
 
@@ -545,10 +586,14 @@ lval* builtin_list(lenv* e, lval* a) {
 
 lval* builtin_eval(lenv* e, lval* a) {
 	LASSERT(a, a->count == 1,
-	 "Function 'eval' passed too many arguments!");
+	 "Function 'eval' passed too many arguments. "
+	"Got %i, Expected %i.",
+	a->count, 1);
 
 	LASSERT(a, a->cell[0]->type == LVAL_QEXPR,
-	 "Function 'eval' passed incorrect type!");
+	 "Function 'eval' passed incorrect type for argument 1. "
+	"Got %s, Expected %s.", 
+	ltype_name(a->cell[0]->type), ltype_name(LVAL_QEXPR));
 
 	lval* x = lval_take(a, 0);
 	x->type = LVAL_SEXPR;
@@ -638,19 +683,32 @@ lval* builtin_init(lenv* e, lval* a) {
 	return result;
 }
 
-// lval* builtin(lval* a, char* func) {
-// 	if (strcmp("list", func) == 0) { return builtin_list(a); }
-// 	if (strcmp("head", func) == 0) { return builtin_head(a); }
-// 	if (strcmp("tail", func) == 0) { return builtin_tail(a); }
-// 	if (strcmp("join", func) == 0) { return builtin_join(a); }
-// 	if (strcmp("eval", func) == 0) { return builtin_eval(a); }
-// 	if (strcmp("cons", func) == 0) { return builtin_cons(a); }
-// 	if (strcmp("len", func) == 0) { return builtin_len(a); }
-// 	if (strcmp("init", func) == 0) { return builtin_init(a); }
-// 	if (strstr("+-/%*minmax", func)) { return builtin_op(a, func); }
-// 	lval_del(a);
-// 	return lval_err("Unknown Function!");
-// }
+lval* builtin_def(lenv* e, lval* a) {
+	LASSERT(a, a->cell[0]->type == LVAL_QEXPR,
+		"Function 'def' passed incorrect type!");
+	
+	/* First argument is symbol list */
+	lval* syms = a->cell[0];
+
+	/* Ensure all elements of first list are symbols */
+	for (int i = 0; i < syms->count; i++) {
+		LASSERT(a, syms->cell[i]->type == LVAL_SYM,
+		"Function 'def' cannot define non-symbol");
+	}
+
+	/* Check correct number of symbols and values */
+	LASSERT(a, syms->count == a->count-1,
+	"Function 'def' cannot define incorrect "
+	"number of values to symbols");
+
+	/* Assign copies of values to symbols */
+	for (int i = 0; i < syms->count; i++) {
+		lenv_put(e, syms->cell[i], a->cell[i+1]);
+	}
+
+	lval_del(a);
+	return lval_sexpr();
+}
 
 void lenv_add_builtin(lenv* e, char* name, lbuiltin func) {
 	lval* k = lval_sym(name);
@@ -668,6 +726,7 @@ void lenv_add_builtins(lenv* e) {
 	lenv_add_builtin(e, "join", builtin_join);
 	lenv_add_builtin(e, "cons", builtin_cons);
 	lenv_add_builtin(e, "init", builtin_init);
+	lenv_add_builtin(e, "def", builtin_def);
 	lenv_add_builtin(e, "len", builtin_len);
 
 	/* Mathematical Functions */
@@ -701,7 +760,7 @@ int main(int argc, char** argv) {
 			Number, Symbol, Sexpr, Qexpr, Expr, Lisps);
 
 	/* Print the version and the exit instructions */
-	puts("Lisps Version 0.0.0.0.6");
+	puts("Lisps Version 0.0.0.0.7");
 	puts("Press Ctrl+c to Exit\n");
 
 	lenv* e = lenv_new();
