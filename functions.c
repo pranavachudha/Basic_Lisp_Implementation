@@ -16,13 +16,13 @@ typedef struct lenv lenv;
 void lval_del(lval* a);
 lval* lval_copy(lval* a);
 lval* lval_err(char* fmt, ...);
-void lval_print(lval* v);
+void lval_print(lval* v, lenv* e);
 lval* lval_eval(lenv* e, lval* v);
 lval* lval_take(lval* v, int i);
 lval* lval_pop(lval* v, int i);
 lval* builtin_op(lenv* e, lval* a, char* op);
 lval* builtin(lval* a, char* func);
-
+lval* builtin_env(lenv* e, lval* a);
 
 
 
@@ -83,7 +83,12 @@ struct lval{
 	/*Error and symbol types have some string data */
 	char* err;
 	char* sym;
-	lbuiltin fun;
+
+	/* Function */
+	lbuiltin builtin;
+	lenv* env;
+	lval* formals;
+	lval* body;
 	/* Count and Pointer to a list of "lval*" */
 	int count;
 	lval** cell;
@@ -198,7 +203,24 @@ lval* lval_sym(char* s) {
 lval* lval_fun(lbuiltin func) {
 	lval* v = malloc(sizeof(lval));
 	v->type = LVAL_FUN;
-	v->fun = func;
+	v->builtin = func;
+	return v;
+}
+
+/* Construct a function to return lval with user defined function's values */
+lval* lval_lambda(lval* formals, lval* body) {
+	lval* v = malloc(sizeof(lval));
+	v->type = LVAL_FUN;
+
+	/* Set Builtin to NULL */
+	v->builtin = NULL;
+
+	/* Build new environment */
+	v->env = lenv_new();
+
+	/* Set Formals and Body */
+	v->formals = formals;
+	v->body = body;
 	return v;
 }
 
@@ -266,7 +288,17 @@ lval* lval_copy(lval* v) {
 
 	switch (v->type) {
 		/* Copy Functions and Numbers Directly */
-		case LVAL_FUN: x->fun = v->fun; break;
+		case LVAL_FUN:
+			if (v->builtin) {
+				x->builtin = v->builtin; break;
+			} else {
+				x->builtin = NULL;
+				x->env = lenv_copy(v->env);
+				x->formals = lval_copy(v->formals);
+				x->body = lval_copy(v->body);
+			}
+		break;
+
 		case LVAL_NUM: x->num = v->num; break;
 
 		/* Copy Strings using malloc and strcpy */
@@ -301,7 +333,13 @@ void lval_del(lval* v) {
 		/* For Err or Sym free the string data */
 		case LVAL_ERR: free(v->err); break;
 		case LVAL_SYM: free(v->sym); break;
-		case LVAL_FUN: break;
+		case LVAL_FUN:
+			if (!v->builtin) {
+				lenv_del(v->env);
+				lval_del(v->formals);
+				lval_del(v->body);
+			}
+		break;
 		/* If Qexpr or Sexpr then delete all elements inside */
 		case LVAL_QEXPR:
 		case LVAL_SEXPR:
@@ -320,7 +358,7 @@ void lval_del(lval* v) {
 void lval_expr_print(lval* v, char open, char close) {
 	putchar(open);
 	for (int i = 0; i < v->count; i++) {
-      		lval_print(v->cell[i]);
+      		lval_print(v->cell[i], NULL);
 
 		if (i != (v->count-1)) {
 			putchar(' ');
@@ -332,13 +370,24 @@ void lval_expr_print(lval* v, char open, char close) {
 
 
 /* Print an "lval" */
-void lval_print(lval* v) {
+void lval_print(lval* v, lenv* e) {
 	switch(v->type) {
 		/* if the v.type value is a number print it and break out */
 		case LVAL_NUM: printf("%.6g", v->num); break;
 		case LVAL_ERR: printf("Error: %s", v->err); break;
 		case LVAL_SYM: printf("%s", v->sym); break;
-		case LVAL_FUN: printf("<function>"); break;
+		case LVAL_FUN:
+			if (v->builtin) {
+				for (int i = 0; i < e->count; i++) {
+					if (e->vals[i]->builtin == *(v->builtin)){
+						printf("%s", e->syms[i]);
+					}
+				}
+			} else {
+				printf("(\\ "); lval_print(v->formals, NULL);
+				putchar(' '); lval_print(v->body, NULL); putchar(')');
+			}
+			break;
 		case LVAL_SEXPR: lval_expr_print(v, '(', ')'); break;
 		case LVAL_QEXPR: lval_expr_print(v, '{', '}'); break;
 	}
@@ -347,7 +396,7 @@ void lval_print(lval* v) {
 
 
 /* Print an "lval" followed by a newline */
-void lval_println(lval* v) { lval_print(v); putchar('\n'); }
+void lval_println(lval* v, lenv* e) { lval_print(v, e); putchar('\n'); }
 
 
 /* Uses recursion to traverse the tree until leaf 
@@ -385,6 +434,9 @@ int number_leaf_nodes(mpc_ast_t* t) {
 lval* lval_eval_sexpr(lenv* e, lval* v){
 	/* Evaluate Children */
 	for (int i = 0; i < v->count; i++){
+		if(v->cell[i]->type == LVAL_SYM){
+			if(strcmp(v->cell[i]->sym, "env") == 0) { return builtin_env(e, v);}
+		}
 		v->cell[i] = lval_eval(e, v->cell[i]);
 	}
 
@@ -406,8 +458,9 @@ lval* lval_eval_sexpr(lenv* e, lval* v){
 		return lval_err("First element is not a function");
 	}
 
+
 	/* Call builtin with operator */
-	lval* result = f->fun(e, v);
+	lval* result = f->builtin(e, v);
 	lval_del(f);
 	return result;
 }
@@ -660,6 +713,20 @@ lval* builtin_init(lenv* e, lval* a) {
 	return result;
 }
 
+lval* builtin_env(lenv* e, lval* a) {
+
+	for (int i = 0; i < e->count; i++) {
+		if (e->vals[i]->type != LVAL_FUN) {
+			printf("%s = ", e->syms[i]);
+			lval_print(e->vals[i], e);
+			printf("\n");
+		}
+	}
+
+	lval_del(a);
+	return lval_sexpr();
+}
+
 lval* builtin_def(lenv* e, lval* a) {
 	LASSERT_TYPE("def", a, 0, LVAL_QEXPR);
 	
@@ -686,6 +753,27 @@ lval* builtin_def(lenv* e, lval* a) {
 	return lval_sexpr();
 }
 
+lval* builtin_lambda(lenv* e, lval* a) {
+	/* Check Two arguments, each of which are Q-Expressions */
+	LASSERT_NOA("\\", a, 2);
+	LASSERT_TYPE("\\", a, 0, LVAL_QEXPR);
+	LASSERT_TYPE("\\", a, 1, LVAL_QEXPR);
+
+	/* Check first Q-Expression contains only Symbols */
+	for (int i = 0; i < a->cell[0]->count; i++) {
+		LASSERT(a, (a->cell[0]->cell[i]->type == LVAL_SYM),
+		"Cannot define non-symbol. Got %s, Expected %s.",
+		ltype_name(a->cell[0]->cell[i]->type), ltype_name(LVAL_SYM));
+	}
+
+	/* Pop first two arguments and pass them to lval_lambda */
+	lval* formals = lval_pop(a, 0);
+	lval* body = lval_pop(a, 0);
+	lval_del(a);
+
+	return lval_lambda(formals, body);
+}
+
 void lenv_add_builtin(lenv* e, char* name, lbuiltin func) {
 	lval* k = lval_sym(name);
 	lval* v = lval_fun(func);
@@ -704,6 +792,8 @@ void lenv_add_builtins(lenv* e) {
 	lenv_add_builtin(e, "init", builtin_init);
 	lenv_add_builtin(e, "def", builtin_def);
 	lenv_add_builtin(e, "len", builtin_len);
+	lenv_add_builtin(e, "env", builtin_env);
+	lenv_add_builtin(e, "\\", builtin_lambda);
 
 	/* Mathematical Functions */
 	lenv_add_builtin(e, "+", builtin_add);
@@ -761,7 +851,7 @@ int main(int argc, char** argv) {
 		if (mpc_parse("<stdin>", input, Lisps, &r)) {
 			//mpc_ast_print(r.output);
 			lval* result = lval_eval(e, lval_read(r.output));
-			lval_println(result);
+			lval_println(result, e);
 			lval_del(result);
 			printf("Total Number of nodes: %d\n", number_of_nodes(r.output));
 			printf("Number of leaf nodes: %d\n", number_leaf_nodes(r.output));
