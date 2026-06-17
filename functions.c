@@ -291,8 +291,7 @@ lval* lval_add(lval* v, lval* x) {
 	
 
 
-lval* lval_read(mpc_ast_t* t) {
-
+lval* lval_read(mpc_ast_t* t) {                            
 	/*If Symbol or Number return conversion to that type */
 	if (strstr(t->tag, "number")) { return lval_read_num(t); }
 	if (strstr(t->tag, "symbol")) { return lval_sym(t->contents); }
@@ -851,6 +850,41 @@ lval* builtin_env(lenv* e, lval* a) {
 	return lval_sexpr();
 }
 
+lval* builtin_fun(lenv* e, lval* a) {
+	LASSERT_NOA("fun", a, 2);
+	LASSERT_TYPE("fun", a, 0, LVAL_QEXPR);
+	LASSERT_TYPE("fun", a, 1, LVAL_QEXPR);
+	LASSERT_ELIST("fun", a, 0);
+	LASSERT_ELIST("fun", a, 1);
+
+	/* Altering the syntax tree and converting it into builtin_def format */
+	lval* func_name_qexpr = lval_qexpr();
+	lval* func_name = lval_pop(a->cell[0], 0);
+	lval_add(func_name_qexpr, func_name);
+
+	/*fun {<func_name> <var1> <var2>} {<body>} converted to
+	def {<func_name>} (\ {<var1> <var2} {<body>}) */
+
+	lval* v = lval_sexpr();
+	lval* x = lval_sym("def");
+	lval* sym = lval_sym("\\");
+	lval* lam = lval_sexpr();
+
+	lval_add(lam, sym);
+	lval_add(lam, a->cell[0]);
+	lval_add(lam, a->cell[1]);
+	
+	lval_add(v, x);
+	lval_add(v, func_name_qexpr);
+	lval_add(v, lval_copy(lam));
+	
+	/* Returning the evaluated result of def-formatted tree */
+	lval_del(a);
+	return lval_eval(e, v);
+	
+}
+
+
 lval* builtin_var(lenv* e, lval* a , char* func) {
 	LASSERT_TYPE(func, a, 0, LVAL_QEXPR);
 	
@@ -929,6 +963,7 @@ void lenv_add_builtins(lenv* e) {
 	lenv_add_builtin(e, "cons", builtin_cons);
 	lenv_add_builtin(e, "init", builtin_init);
 	lenv_add_builtin(e, "def", builtin_def);
+	lenv_add_builtin(e, "fun", builtin_fun);
 	lenv_add_builtin(e, "len", builtin_len);
 	lenv_add_builtin(e, "env", builtin_env);
 	lenv_add_builtin(e, "\\", builtin_lambda);
