@@ -411,7 +411,7 @@ lval* lval_call(lenv* e, lval* f, lval* a) {
 		if (strcmp(sym->sym, "&") == 0) {
 
 			/* Ensure '&' is followed by another symbol */
-			if (f->formals->count != 1) {
+			if (f->formals->count != 2) {
 				lval_del(a);
 				return lval_err("Function format invalid. "
 				"Symbol '&' not followed by single symbol.");
@@ -946,6 +946,130 @@ lval* builtin_lambda(lenv* e, lval* a) {
 	return lval_lambda(formals, body);
 }
 
+lval* builtin_greater(lenv* e, lval* a) {
+	/*Check Two arguments*/
+	LASSERT_NOA(">", a, 2);
+	LASSERT(a, ( a->cell[0]->type == a->cell[1]->type ), 
+	"Cannot Compare %s and %s", ltype_name(a->cell[0]->type),
+	ltype_name(a->cell[1]->type));
+	
+	lval* first = lval_pop(a, 0);
+	lval* second = lval_pop(a, 0);
+
+	switch (first->type) {
+		case LVAL_NUM: if (first->num > second->num) return lval_num(1); else return lval_num(0);
+	}
+
+
+	
+	lval_del(first);
+	lval_del(second);
+	lval_del(a);
+	return lval_num(0);
+	
+
+}
+
+lval* builtin_lesser(lenv* e, lval* a) {
+	/*Check Two arguments*/
+	LASSERT_NOA("<", a, 2);
+	LASSERT(a, ( a->cell[0]->type == a->cell[1]->type ), 
+	"Cannot Compare %s and %s", ltype_name(a->cell[0]->type),
+	ltype_name(a->cell[1]->type));
+	
+	lval* first = lval_pop(a, 0);
+	lval* second = lval_pop(a, 0);
+
+	switch (first->type) {
+		case LVAL_NUM: if (first->num < second->num) return lval_num(1); else return lval_num(0);
+	}
+
+
+	
+	lval_del(first);
+	lval_del(second);
+	lval_del(a);
+	return lval_num(0);
+}
+
+lval* builtin_equal(lenv* e, lval* a) {
+	/*Check Two arguments*/
+	LASSERT_NOA(">", a, 2);
+	LASSERT(a, ( a->cell[0]->type == a->cell[1]->type ), 
+	"Cannot Compare %s and %s", ltype_name(a->cell[0]->type),
+	ltype_name(a->cell[1]->type));
+	
+	lval* first = lval_pop(a, 0);
+	lval* second = lval_pop(a, 0);
+
+	switch (first->type) {
+		case LVAL_NUM: if (first->num == second->num) return lval_num(1); else return lval_num(0);
+
+		case LVAL_QEXPR: 
+			if (first->count == second->count) {
+				for (int i = 0; i < first->count; i++) {
+					if(first->cell[i]->type != second->cell[i]->type){
+						return lval_num(0);
+					}
+					lval* x = lval_sexpr();
+					lval_add(x, first->cell[i]);
+					lval_add(x, second->cell[i]);
+					lval* equal_output = builtin_equal(e, x);
+					if (equal_output->num == 1){
+						lval_del(equal_output);
+						continue;
+					}
+					else{
+						return lval_num(0);
+					}
+					
+
+				}
+				
+				return lval_num(1);
+			}
+	}
+	
+	lval_del(first);
+	lval_del(second);
+	lval_del(a);
+	return lval_num(0);
+}
+
+lval* builtin_greater_equal(lenv* e, lval* a){
+	lval* x = lval_copy(a);
+	lval* ans = builtin_greater(e, x)
+	;
+	if (ans->num == 1){
+		lval_del(ans);
+		return lval_num(1);
+	}
+
+	else {
+		lval_del(ans);
+		return builtin_equal(e, a);
+	}
+
+	
+}
+
+lval* builtin_lesser_equal(lenv* e, lval* a){
+	lval* x = lval_copy(a);
+	lval* ans = builtin_lesser(e, x);
+	if (ans->num == 1){
+		lval_del(ans);
+		return lval_num(1);
+	}
+
+	else {
+		lval_del(ans);
+		return builtin_equal(e, a);
+	}
+
+	
+}
+
+
 void lenv_add_builtin(lenv* e, char* name, lbuiltin func) {
 	lval* k = lval_sym(name);
 	lval* v = lval_fun(func);
@@ -975,6 +1099,11 @@ void lenv_add_builtins(lenv* e) {
 	lenv_add_builtin(e, "*", builtin_mul);
 	lenv_add_builtin(e, "/", builtin_div);
 	lenv_add_builtin(e, "%", builtin_rem);
+	lenv_add_builtin(e, ">", builtin_greater);
+	lenv_add_builtin(e, "<", builtin_lesser);
+	lenv_add_builtin(e, "==", builtin_equal);
+	lenv_add_builtin(e, ">=", builtin_greater_equal);
+	lenv_add_builtin(e, "<=", builtin_lesser_equal);
 	lenv_add_builtin(e, "max", builtin_max);
 	lenv_add_builtin(e, "min", builtin_min);
 	
