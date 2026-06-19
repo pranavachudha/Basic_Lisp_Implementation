@@ -1036,6 +1036,18 @@ lval* builtin_equal(lenv* e, lval* a) {
 	return lval_num(0);
 }
 
+lval* builtin_not_equal(lenv* e, lval* a) {
+	lval* eq_answer = builtin_equal(e, a);
+
+	if(eq_answer->num == 1) {
+		return lval_num(0);
+	}
+
+	lval_del(eq_answer);
+	return lval_num(1);
+
+}
+
 lval* builtin_greater_equal(lenv* e, lval* a){
 	lval* x = lval_copy(a);
 	lval* ans = builtin_greater(e, x)
@@ -1069,6 +1081,47 @@ lval* builtin_lesser_equal(lenv* e, lval* a){
 	
 }
 
+lval* builtin_if(lenv* e, lval* a) {
+	LASSERT_NOA("if", a, 3);
+
+	for (int i = 0; i < a->count; i++) {
+		LASSERT_TYPE("if", a, i, LVAL_QEXPR);
+	}
+	
+	lval* condition = lval_pop(a, 0);
+	char* comp_op[] = {"<", ">", "<=", ">=", "=="};
+	int op_flag = 1;
+
+	for (int i = 0; i < sizeof(comp_op)/sizeof(comp_op[0]); i++) {
+		if (strcmp(condition->cell[0]->sym, comp_op[i]) == 0) {
+			op_flag = 0;
+			break;
+		}
+	}
+
+	if (op_flag == 1) {
+		return lval_err("Cannot use non-comparison operators for condition in 'if' function.");
+	}
+	
+	lval* answer = lval_sexpr();
+	lval_add(answer, condition);
+	
+	
+	if (builtin_eval(e, answer)->num == 1) {
+		lval* if_true = lval_sexpr();
+		lval_add(if_true, lval_sym("eval"));
+		lval_add(if_true, lval_pop(a, 0));
+		lval_del(a);
+		return lval_eval(e, if_true);
+	}
+
+	
+	lval* if_false = lval_sexpr();
+	lval_add(if_false, lval_sym("eval"));
+	lval_add(if_false, lval_pop(a, 1));
+	lval_del(a);
+	return lval_eval(e, if_false);
+}
 
 void lenv_add_builtin(lenv* e, char* name, lbuiltin func) {
 	lval* k = lval_sym(name);
@@ -1088,6 +1141,7 @@ void lenv_add_builtins(lenv* e) {
 	lenv_add_builtin(e, "init", builtin_init);
 	lenv_add_builtin(e, "def", builtin_def);
 	lenv_add_builtin(e, "fun", builtin_fun);
+	lenv_add_builtin(e, "if", builtin_if);
 	lenv_add_builtin(e, "len", builtin_len);
 	lenv_add_builtin(e, "env", builtin_env);
 	lenv_add_builtin(e, "\\", builtin_lambda);
@@ -1102,6 +1156,7 @@ void lenv_add_builtins(lenv* e) {
 	lenv_add_builtin(e, ">", builtin_greater);
 	lenv_add_builtin(e, "<", builtin_lesser);
 	lenv_add_builtin(e, "==", builtin_equal);
+	lenv_add_builtin(e, "!=", builtin_not_equal);
 	lenv_add_builtin(e, ">=", builtin_greater_equal);
 	lenv_add_builtin(e, "<=", builtin_lesser_equal);
 	lenv_add_builtin(e, "max", builtin_max);
