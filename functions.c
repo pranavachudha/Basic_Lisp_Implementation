@@ -1081,6 +1081,59 @@ lval* builtin_lesser_equal(lenv* e, lval* a){
 	
 }
 
+int operator_check(lval* a){
+	char* comp_op[] = {"<", ">", "<=", ">=", "==", "!="};
+	int op_flag = 1;
+
+	for (int i = 0; i < sizeof(comp_op)/sizeof(comp_op[0]); i++) {
+		if (strcmp(a->cell[0]->sym, comp_op[i]) == 0) {
+			op_flag = 0;
+			break;
+		}
+	}
+
+	if (op_flag == 1) {
+		return 0;
+	}
+	
+	return 1;
+}
+
+lval* builtin_or(lenv*e, lval* a) {
+	LASSERT_NOA("||", a, 2);
+	LASSERT_TYPE("||", a, 0, LVAL_NUM);
+	LASSERT_TYPE("||", a, 1, LVAL_NUM);
+
+	if (a->cell[0]->num == 1 || a->cell[1]->num == 1){
+		return lval_num(1);
+	}
+
+	return lval_num(0);
+}
+
+lval* builtin_and(lenv*e, lval* a) {
+	LASSERT_NOA("&&", a, 2);
+	LASSERT_TYPE("&&", a, 0, LVAL_NUM);
+	LASSERT_TYPE("&&", a, 1, LVAL_NUM);
+
+	if (a->cell[0]->num == 1 && a->cell[1]->num == 1){
+		return lval_num(1);
+	}
+
+	return lval_num(0);
+}
+
+lval* builtin_not(lenv* e, lval* a) {
+	LASSERT_NOA("~", a, 1);
+	LASSERT_TYPE("~", a, 0, LVAL_NUM);
+
+	if (a->cell[0]->num == 1) {
+		return lval_num(0);
+	}
+
+	return lval_num(1);
+}
+
 lval* builtin_if(lenv* e, lval* a) {
 	LASSERT_NOA("if", a, 3);
 
@@ -1088,8 +1141,8 @@ lval* builtin_if(lenv* e, lval* a) {
 		LASSERT_TYPE("if", a, i, LVAL_QEXPR);
 	}
 	
-	lval* condition = lval_pop(a, 0);
-	char* comp_op[] = {"<", ">", "<=", ">=", "=="};
+	lval* condition = lval_copy(a->cell[0]);
+	char* comp_op[] = {"<", ">", "<=", ">=", "==", "!=", "||", "&&", "~"};
 	int op_flag = 1;
 
 	for (int i = 0; i < sizeof(comp_op)/sizeof(comp_op[0]); i++) {
@@ -1103,14 +1156,13 @@ lval* builtin_if(lenv* e, lval* a) {
 		return lval_err("Cannot use non-comparison operators for condition in 'if' function.");
 	}
 	
-	lval* answer = lval_sexpr();
-	lval_add(answer, condition);
+	condition->type = LVAL_SEXPR;
 	
 	
-	if (builtin_eval(e, answer)->num == 1) {
+	if (lval_eval(e, condition)->num == 1) {
 		lval* if_true = lval_sexpr();
 		lval_add(if_true, lval_sym("eval"));
-		lval_add(if_true, lval_pop(a, 0));
+		lval_add(if_true, lval_copy(a->cell[1]));
 		lval_del(a);
 		return lval_eval(e, if_true);
 	}
@@ -1118,7 +1170,7 @@ lval* builtin_if(lenv* e, lval* a) {
 	
 	lval* if_false = lval_sexpr();
 	lval_add(if_false, lval_sym("eval"));
-	lval_add(if_false, lval_pop(a, 1));
+	lval_add(if_false, lval_copy(a->cell[2]));
 	lval_del(a);
 	return lval_eval(e, if_false);
 }
@@ -1153,6 +1205,8 @@ void lenv_add_builtins(lenv* e) {
 	lenv_add_builtin(e, "*", builtin_mul);
 	lenv_add_builtin(e, "/", builtin_div);
 	lenv_add_builtin(e, "%", builtin_rem);
+
+	/* Comparision Operators*/
 	lenv_add_builtin(e, ">", builtin_greater);
 	lenv_add_builtin(e, "<", builtin_lesser);
 	lenv_add_builtin(e, "==", builtin_equal);
@@ -1162,6 +1216,10 @@ void lenv_add_builtins(lenv* e) {
 	lenv_add_builtin(e, "max", builtin_max);
 	lenv_add_builtin(e, "min", builtin_min);
 	
+	/* Logical Operators*/
+	lenv_add_builtin(e, "||", builtin_or);
+	lenv_add_builtin(e, "&&", builtin_and);
+	lenv_add_builtin(e, "~", builtin_not);
 }
 
 int main(int argc, char** argv) {
@@ -1175,7 +1233,7 @@ int main(int argc, char** argv) {
 	mpca_lang(MPCA_LANG_DEFAULT,
 			" 					     	     \
 			number: /-?[0-9]+(\\.[0-9]+)?/; 		     \
-			symbol: /[a-zA-Z0-9_+\\-*\\/\\\\=<>!&]+/;	     \
+			symbol: /[a-zA-Z0-9_+\\-*\\/\\\\=<>!&|~]+/;	     \
 			sexpr: '(' <expr>* ')' ;			     \
 			qexpr: '{' <expr>* '}' ;			     \
 			expr: <number> | <symbol> | <sexpr> | <qexpr> ;      \
